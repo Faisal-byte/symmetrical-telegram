@@ -1589,8 +1589,7 @@ class Multiplayer():
         allUsersList = tkinter.Listbox(mainScreen)
 
         for friend in friends:
-            if friend == 'assertivethrush' or friend == 'fts':
-                self.ChatCommObj.sendMessage(friend, "Are you online?")
+            self.ChatCommObj.sendMessage(friend, "Are you online?")
 
         for user in users:
             allUsersList.insert(tkinter.END, user)

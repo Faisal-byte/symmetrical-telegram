@@ -1,10 +1,14 @@
 # Faisal Mashhadi
 # fmashhad
 
-# Engine for implementing the rules of Chess
+# This file is the Engine for implementing all the rules of Chess
+# This includes castling and en passant moves :D
+from collections import Counter
 
 class GameLogic():
     def __init__(self):
+        # This is the core of my project. All rules laws are governed by this
+        # tabel :D
         self.board = [
         ['bRq', 'bN', 'bB', 'bQ', 'bK', 'bB', 'bN', 'bRk'],
         ['bP', 'bP', 'bP', 'bP', 'bP', 'bP', 'bP', 'bP'],
@@ -16,6 +20,7 @@ class GameLogic():
         ['wRq', 'wN', 'wB', 'wQ', 'wK', 'wB', 'wN', 'wRk']]
 
         self.moveLog = []
+        self.boardPositionsData = []
         self.player = 0
         self.whiteKing = [[7,4]]
         self.blackKing = [[0,4]]
@@ -31,10 +36,31 @@ class GameLogic():
         self.board[pos[0]][pos[1]] = title
 
 
+    def resetBoard(self):
+        self.board = [
+        ['bRq', 'bN', 'bB', 'bQ', 'bK', 'bB', 'bN', 'bRk'],
+        ['bP', 'bP', 'bP', 'bP', 'bP', 'bP', 'bP', 'bP'],
+        ['','','','','','','',''],
+        ['','','','','','','',''],
+        ['','','','','','','',''],
+        ['','','','','','','',''],
+        ['wP', 'wP', 'wP', 'wP', 'wP', 'wP', 'wP', 'wP'],
+        ['wRq', 'wN', 'wB', 'wQ', 'wK', 'wB', 'wN', 'wRk']]
+        
+
+    def setPlayer(self, plr):
+        self.player = plr
+
+
+    def getMoveLog(self):
+        return self.moveLog
+
+
     def getPlayer(self):
         if self.player % 2 == 0:
             return "w"
         return "b"
+
 
     def getKingPositions(self):
         return self.whiteKing, self.blackKing
@@ -49,7 +75,7 @@ class GameLogic():
 
 
     def undoMove(self):
-        if len(self.moveLog) > 0:
+        if len(self.moveLog) >= 1:
             # lMove is the last move done by a player
             lMove = self.moveLog.pop()
             self.board[lMove.currPos[0]][lMove.currPos[1]] = lMove.piece
@@ -82,6 +108,7 @@ class GameLogic():
             if lMove.piece == 'wK':
                 king, col, plr = self.whiteKing, 7, 'w'
                 king.pop()
+
             elif lMove.piece == 'bK':
                 king, col, plr = self.blackKing, 0, 'b'
                 king.pop()
@@ -101,14 +128,16 @@ class GameLogic():
 
 
 
-    def makeMove(self, currPos, toPos):
+    def makeMove(self, currPos, toPos, board=[]):
+        if len(board) == 0:
+            board = self.board
         # where currPos and toPos are both lists of [row, column] 
         if self.isValidMove(currPos, toPos) != 'REJECTED':
             self.clearEnPassant()
             self.moveLog.append(Move(self, currPos, toPos))
 
-            piece = self.board[currPos[0]][currPos[1]]
-            capturedPiece = self.board[toPos[0]][toPos[1]]
+            piece = board[currPos[0]][currPos[1]]
+            capturedPiece = board[toPos[0]][toPos[1]]
 
             # EN PASSANT
             if piece[1] == 'P':
@@ -119,8 +148,8 @@ class GameLogic():
                     else:
                         self.board[toPos[0]-1][toPos[1]] = ''
             
-            self.board[currPos[0]][currPos[1]] = ''
-            self.board[toPos[0]][toPos[1]] = piece
+            board[currPos[0]][currPos[1]] = ''
+            board[toPos[0]][toPos[1]] = piece
 
             if piece == 'wK':
                 king, col, plr = self.whiteKing, 7, 'w'
@@ -131,12 +160,12 @@ class GameLogic():
 
             if piece[1] == 'K' and len(king) == 2 and king[0] == [col, 4]:
                 if toPos[1] == 6:
-                    self.board[col][7] = ''
-                    self.board[col][5] = plr+'Rk'
+                    board[col][7] = ''
+                    board[col][5] = plr+'Rk'
                     self.movedRooks.append(plr+'Rk')
                 elif toPos[1] == 2:
-                    self.board[col][0] = ''
-                    self.board[col][3] = plr+'Rq'
+                    board[col][0] = ''
+                    board[col][3] = plr+'Rq'
                     self.movedRooks.append(plr+'Rq')
 
             # PAWN PROMOTION and EN PASSANT
@@ -158,7 +187,7 @@ class GameLogic():
         return "REJECTED"
 
 
-    def getValidSquares(self, currPos):
+    def getValidSquares(self, currPos, board=[]):
         board = self.board
         piece = board[currPos[0]][currPos[1]]
         if piece:
@@ -188,7 +217,7 @@ class GameLogic():
                 otherPieceSquares2 = otherPieceSquares[:]
 
                 
-                # find which squares the piece can be placed to block other
+                # find which squares the piece can be placed to block 'other'
                 if checks[3] == 0:
                     # up and down
                     for square in otherPieceSquares2:
@@ -276,7 +305,7 @@ class GameLogic():
                                         newValidSquares.append(square)
 
                             if checks[2] >= 1 and checks[3] >= 2:
-
+                                # diagonals
                                 s, i = [checks[0], checks[1]], 0
                                 
                                 if checks[2] == 1 and checks[3] == 2:
@@ -391,13 +420,15 @@ class GameLogic():
         return newValidSquares
 
 
-    def isValidMove(self, currPos, toPos):
-        if toPos in self.getValidSquares(currPos):
+    def isValidMove(self, currPos, toPos, board=[]):
+        if toPos in self.getValidSquares(currPos, board):
             return True
         return 'REJECTED'
 
 
-    def checks(self, pos=[]):
+    def checks(self, pos=[], board=[]):
+        if len(board) == 0:
+            board = self.board
         temp = []
         attackingPieces = []
         pinnedPieces = []
@@ -439,7 +470,7 @@ class GameLogic():
                 check = False
 
                 while -1 < pos[0] < 8 and -1 < pos[1] < 8 and threat and not check:
-                    square = self.board[pos[0]][pos[1]]
+                    square = board[pos[0]][pos[1]]
 
                     if square:
                         # if this square has a piece, check what piece this is
@@ -483,11 +514,11 @@ class GameLogic():
                 pos2 = [king[0]+((-i-1)*j), king[1]-2+i]
 
                 if -1 < pos1[0] < 8 and -1 < pos1[1] < 8:
-                    if self.board[pos1[0]][pos1[1]] == f"{enemy}N":
+                    if board[pos1[0]][pos1[1]] == f"{enemy}N":
                         attackingPieces.append([pos1[0], pos1[1], i-1 , -1])
 
                 if -1 < pos2[0] < 8 and -1 < pos2[1] < 8:
-                    if self.board[pos2[0]][pos2[1]] == f"{enemy}N":
+                    if board[pos2[0]][pos2[1]] == f"{enemy}N":
                         attackingPieces.append([pos2[0], pos2[1], i-1, -1])
 
         # Pawns
@@ -495,7 +526,7 @@ class GameLogic():
             pos1 = [king[0]+plr, king[1]+i]
 
             if -1 < pos1[0] < 8 and -1 < pos1[1] < 8:
-                if self.board[pos1[0]][pos1[1]] == f"{enemy}P":
+                if board[pos1[0]][pos1[1]] == f"{enemy}P":
                     attackingPieces.append([pos1[0], pos1[1], i-1, -2])
 
         # King
@@ -504,32 +535,37 @@ class GameLogic():
                 pos1 = [king[0]-j, king[1]-1+i]
 
                 if -1 < pos1[0] < 8 and -1 < pos1[1] < 8:
-                    if self.board[pos1[0]][pos1[1]] == f"{enemy}K":
+                    if board[pos1[0]][pos1[1]] == f"{enemy}K":
                         attackingPieces.append([pos1[0], pos1[1], i-2, -3])
 
         for i in range(-1, 2, 2):
             pos2 = [king[0], king[1]-i]
 
             if -1 < pos2[0] < 8 and -1 < pos2[1] < 8:
-                if self.board[pos2[0]][pos2[1]] == f"{enemy}K":
+                if board[pos2[0]][pos2[1]] == f"{enemy}K":
                     attackingPieces.append([pos2[0], pos2[1], i-2, -3])
 
 
         return attackingPieces, pinnedPieces
 
 
-    def getAllPossibleMoves(self):
+    def getAllPossibleMoves(self, board=[], allMoves=True, AI=False):
         allPieces = []
         allPossibleMoves = {}
         color = self.getPlayer()
-        board = self.board
+        if len(board) == 0:
+            board = self.board
 
         # get allPieces and allPossibleMoves from the board
         for r in range(8):
             for c in range(8):
                 if board[r][c]:
                     # if there is a piece, append this piece to allPieces
-                    allPieces.append(board[r][c][1])
+                    if not allMoves:
+                        if board[r][c][1] == color:
+                            allPieces.append(board[r][c][1])
+                    else:
+                        allPieces.append(board[r][c][1])
                     if board[r][c][0] == color:
                         validSquares = self.getValidSquares([r, c])
                         if validSquares:
@@ -602,24 +638,25 @@ class ChessPieces():
         else:
             plr = -1
 
+        if -1 < self.currSqr[0]-plr < 8 and -1 < self.currSqr[1] < 8:
+            fSqr = self.board[self.currSqr[0]-plr][self.currSqr[1]]
+            if not fSqr:
+                # the square in front of us is empty :D
+                # note because we set plr, 
+                # this works if the pawn is black or white :D
+                possibleMoves.append([self.currSqr[0]-plr, self.currSqr[1]])
 
-        fSqr = self.board[self.currSqr[0]-plr][self.currSqr[1]]
-        if not fSqr:
-            # the square in front of us is empty :D
-            # note because we set plr, 
-            # this works if the pawn is black or white :D
-            possibleMoves.append([self.currSqr[0]-plr, self.currSqr[1]])
-
-            ffSqr = self.board[self.currSqr[0]-plr*2][self.currSqr[1]]
-            if not ffSqr:
-                if self.currSqr[0] == 6 and plr == 1:
-                    possibleMoves.append([self.currSqr[0]-plr*2, self.currSqr[1]])
-                elif self.currSqr[0] == 1 and plr == -1:
-                    possibleMoves.append([self.currSqr[0]-plr*2, self.currSqr[1]])
+                if -1 < self.currSqr[0]-plr*2 < 8 and -1 < self.currSqr[1] < 8:
+                    ffSqr = self.board[self.currSqr[0]-plr*2][self.currSqr[1]]
+                    if not ffSqr:
+                        if self.currSqr[0] == 6 and plr == 1:
+                            possibleMoves.append([self.currSqr[0]-plr*2, self.currSqr[1]])
+                        elif self.currSqr[0] == 1 and plr == -1:
+                            possibleMoves.append([self.currSqr[0]-plr*2, self.currSqr[1]])
                     
 
         # now check if this pawn can gobble up any pieces 
-        if self.currSqr[1] != 0:
+        if self.currSqr[1] != 0 and -1 < self.currSqr[0]-plr < 8 and -1 < self.currSqr[1]-1 < 8:
             d1Srq = self.board[self.currSqr[0]-plr][self.currSqr[1]-1]
             d1SrqPos = [self.currSqr[0]-plr, self.currSqr[1]-1]
 
@@ -637,7 +674,7 @@ class ChessPieces():
                                 self.enPassant[pos][1]])
 
         
-        if self.currSqr[1] != 7:
+        if self.currSqr[1] != 7 and -1 < self.currSqr[0]-plr < 8 and -1 < self.currSqr[1]+1 < 8:
             d2Srq = self.board[self.currSqr[0]-plr][self.currSqr[1]+1]
             d2SrqPos = [self.currSqr[0]-plr, self.currSqr[1]+1]
 

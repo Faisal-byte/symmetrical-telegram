@@ -673,7 +673,7 @@ class Chess(ShowBase):
                             self.taskMgr.add(self.playAnimation, f"Animation{ID}", 
                                 extraArgs=[newPiece, [7-(m4*2), -7+(m3*2)], 
                                 s1, s2, ID])
-
+                            
                             self.Engine.switchPlayer()
 
                             self.evaluateGame() 
@@ -902,11 +902,15 @@ class Chess(ShowBase):
         else:
             self.chatConn.sendMessage(self.nameP2,
                             f'PROMOTION{title}{pos[2]}{pos[3]}{pos[0]}{pos[1]}')
+            self.taskMgr.doMethodLater(1.0, self.waitForOpponent, "WaitingForOpponent")
+            
         self.evaluateGame()
         self.drawBoard()
 
         for button in self.titleButtons:
             button.destroy()
+
+        self.Engine.switchPlayer()
 
 
     def highlightTiles(self, pos, color):
@@ -1492,7 +1496,6 @@ class Multiplayer():
         if friendList.curselection():
             friend = friendList.get(friendList.curselection())
             friend = friend[friend.find(' ')+1:]
-            print(friend)
             
             if friend in self.online:
                 self.sentRequests.append(friend)

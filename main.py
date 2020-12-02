@@ -894,7 +894,7 @@ class Chess(ShowBase):
         self.Engine.moveLog.append(["PROMOTION", [pos[2], pos[3], pos[0], pos[1]]])
 
         if self.mode == 'AI':
-            if self.Engine.getPlayer() != self.enemyColor:
+            if self.Engine.getPlayer() == self.enemyColor:
                 self.AIToPlay = True
                 self.taskMgr.doMethodLater(.5, self.makeAIMove, "AIHandler")
             else:

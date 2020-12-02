@@ -1,5 +1,8 @@
 # Faisal Mashhadi
 # fmashhad
+# This file handles the user input, client code of the multiplayer feature,
+# and getting moves from the ChessAI file to display it to your screen
+# In essence this file handles the UI with the user
 
 from panda3d.core import loadPrcFileData
 from direct.showbase.ShowBase import ShowBase
@@ -20,7 +23,7 @@ from ChessEngine import GameLogic
 from ChatClient import chatComm
 from ChessAI import basicAI
 
-# sets up the title for the panda window to "Chess"
+# sets up the title for the panda window to "The Queen's Gambit'"
 loadPrcFileData('', 
                 '''window-title The Queen's Gambit''')
 
@@ -29,20 +32,39 @@ PATH = os.getcwd() + '/'
 class Chess(ShowBase):
 
     def __init__(self, mode, p1, p2, color='', chatConn=''):
+        # setup ShowBase instance
         ShowBase.__init__(self)
+
+        
+        # setup background music and sound effects
+        self.mySound = self.loader.loadSfx("Sounds/Chillout-downtempo-music-loop.mp3")
+        self.mySound.setLoop(True)
+        self.mySound.play()
+        self.mySound.setVolume(0.2)
+        
+        self.beep = self.loader.loadSfx("Sounds/click.mp3")
+        self.beep.setVolume(0.6)
+
+        self.beep2 = self.loader.loadSfx("Sounds/click2.mp3")
+        self.beep2.setVolume(0.6)
+
+        self.buttonError = self.loader.loadSfx("Sounds/error.mp3")
+        self.buttonError.setVolume(0.6)
 
         # setup engine reference and get board
         self.Engine = GameLogic()
         self.boardState = self.Engine.getBoard()
         self.player = self.Engine.getPlayer()
 
+        # setup name of the players
         self.nameP1 = p1
         self.nameP2 = p2
-        self.timerP1 = 600
-        self.timerP2 = 600
+
+        # This variable determines whether the end of the game has been
+        # reached or not 
         self.end = False
 
-
+        # Determines which player you're playing as
         if color:
             self.myColor = color
             # set camera view based on myColor
@@ -55,6 +77,7 @@ class Chess(ShowBase):
                 self.changeView()
                 self.enemyColor = 'w'
 
+        # If this is true, then you're playing online
         if chatConn:
             self.chatConn = chatConn
             
@@ -68,9 +91,13 @@ class Chess(ShowBase):
             self.undoButton = DirectGui.DirectButton(text=('Request Undo'),
                                         pos=(1.1,1.1,-0.7), scale=0.05, 
                                         command=lambda x='U': self.sendP2(x))
+            
 
             self.allowDrawRequestThisMove = True
             self.allowUndoRequestThisMove = True
+            self.timerP1 = 600
+            self.timerP2 = 600
+            self.passedTime = 0
 
             # Show timer on screen if online
             self.timerP1Label = OnscreenText(text ='10:00', 
@@ -79,13 +106,26 @@ class Chess(ShowBase):
             self.timerP2Label = OnscreenText(text ='10:00', 
                             pos = (.5,-.95), scale = .05, mayChange=True)
 
-        # AI or multiplayer
+            if self.myColor == 'b':
+                self.taskMgr.doMethodLater(1.0, self.waitForOpponent, "WaitingForOpponent")
+            else:
+                self.taskMgr.doMethodLater(1.0, self.startTemporaryTimer, "WaitingForFirstMove")
+
+
+        # Save the mode you're playing in in this variable
         self.mode = mode
 
+        # setup AI configurations (if the mode is AI)
         if self.mode == 'AI':
-            self.AIToPlay = False
-            self.AI = basicAI(self.Engine, self.enemyColor)
+            if self.myColor == 'w':
+                self.AIToPlay = False
+            else:
+                self.AIToPlay = True
+
+            self.AI = basicAI(self.enemyColor)
             self.accept('z', self.undo)
+            self.taskMgr.doMethodLater(.5, self.makeAIMove, "AIHandler")
+
         
         # disable camera movement
         self.disableMouse()
@@ -180,7 +220,7 @@ class Chess(ShowBase):
         self.pieceHolders = {}
         pPATH = PATH + 'Models/'
         self.pTextures = [loader.loadTexture(f"{PATH}/Textures/whitefabric.jpg"),
-                              loader.loadTexture(f"{PATH}/Textures/blackhighlight.jpg")]
+                              loader.loadTexture(f"{PATH}/Textures/black.jpg")]
         self.pieces = {'K': loader.loadModel(f"{pPATH}K.obj"),
                  'Q': loader.loadModel(f"{pPATH}Q.obj"),
                  'R': loader.loadModel(f"{pPATH}R.obj"),
@@ -188,7 +228,8 @@ class Chess(ShowBase):
                  'N': loader.loadModel(f"{pPATH}N.obj"),
                  'P': loader.loadModel(f"{pPATH}P.obj")}
 
-
+        
+        # setup other random stuff
         self.drawBoard()
         self.choosingTitle = False
         self.titleButtons = []
@@ -196,15 +237,16 @@ class Chess(ShowBase):
         self.timer = []
         self.allowChanging = False
 
+        # setup event handlers for user input
         self.accept('x', self.changingCamera)
         self.accept('mouse1',self.mouseTask)
-        self.accept('escape', self.close)
+        self.accept('escape', lambda: self.endHandler("NO"))
 
         # show wins and player stats
         self.plr1Color, self.plr2Color = '', ''
         self.plr1WinsText, self.plr2WinsText, self.drawsText = '', '', ''
         self.displayWins()
-        
+
     
     def drawPieces(self, pieceHolders, pieces, boardState, texture):
         # loop through all the squares in a chess board
@@ -271,12 +313,7 @@ class Chess(ShowBase):
                             self.Engine.switchPlayer()
                             self.player = self.Engine.getPlayer()
                             self.drawBoard()
-                    else:
-                        self.AIToPlay = False
-                        self.Engine.switchPlayer()
-                        self.player = self.Engine.getPlayer()
-                        self.drawBoard()
-                        
+                            
                 self.coolDown += 1
                 self.Engine.switchPlayer()
                 self.player = self.Engine.getPlayer()
@@ -350,6 +387,7 @@ class Chess(ShowBase):
                 # make sure user clicked on a tile
                 # and make sure the user isn't promoting a pawn or the game isn't over
                 if pickedObj and not self.choosingTitle and not self.end:
+                    self.beep.play()
                     objectTag = pickedObj.findNetTag('Tile')
                     pickedObj = pickedObj.getNetTag('Tile')
                     self.selectedTiles.append([pickedObj, objectTag])
@@ -403,14 +441,14 @@ class Chess(ShowBase):
                                     move = 'INCORRECT PLAYER'
 
                                 if move == "SUCCESS":
-                                    self.AIToPlay = True
                                     self.coolDown = 0
                                     self.highlightTiles([toRow, toCol], "ORANGE")
                                     newPiece, label = self.setupAnimation([currRow, currCol], [toRow, toCol])
                                     self.boardState = self.Engine.getBoard()
                                     if self.mode == "Multiplayer":
+                                        self.passedTime = 0
                                         self.chatConn.sendMessage(self.nameP2, f"{currRow}{currCol}{toRow}{toCol}")
-                                        
+                                        self.chatConn.sendMessage(self.nameP2, f"TIMER: {self.timerP1}")
                                     
                                     # set speed for animation
                                     s1, s2 = .2, .2
@@ -434,7 +472,9 @@ class Chess(ShowBase):
                             
                                     # switch player and check if the game is over
                                     self.Engine.switchPlayer()
-                                    self.evaluateGame() 
+
+                                    if self.mode != 'AI':
+                                        self.evaluateGame() 
 
                                 elif move == 'PROMOTION':
                                     self.highlightTiles([toRow, toCol], "ORANGE")
@@ -448,8 +488,10 @@ class Chess(ShowBase):
                                     
                                     title = self.askForPromotionTitle([toRow, toCol, currRow, currCol])
 
-                                    self.Engine.switchPlayer()
-                                    self.evaluateGame()
+
+
+                                    if self.mode != 'AI':
+                                        self.evaluateGame()
 
 
                                 self.player = self.Engine.getPlayer()
@@ -473,7 +515,7 @@ class Chess(ShowBase):
         newMessages, newFiles = self.chatConn.getMail()
         update = False
 
-        if newMessages != []:
+        if newMessages != [] and not self.end:
             for u,m in newMessages:
                 if u == self.nameP2:
                     if m == "Draw?":
@@ -493,9 +535,9 @@ class Chess(ShowBase):
                             self.chatConn.sendMessage(u, "Draw Declined!")
 
                     elif m == "I Resign" or m == "I Quit.":
-                        if myColor == 'w':
+                        if self.myColor == 'w':
 
-                            mate = OnscreenText(text =f'{u} Resigned.', pos = (0,0.2), scale = .3)
+                            mate = OnscreenText(text = 'Opponent Resigned.', pos = (0,0.2), scale = .2)
                             textObject = OnscreenText(text = 'WHITE WON THE GAME!', 
                                 pos = (0,0), scale = .1)
 
@@ -505,7 +547,7 @@ class Chess(ShowBase):
                                 wins[1] += 1
 
                         else:
-                            mate = OnscreenText(text = f'{u} Resigned.', pos = (0,0.2), scale = .3)
+                            mate = OnscreenText(text = 'Opponent Resigned.', pos = (0,0.2), scale = .2)
                             textObject = OnscreenText(text = 'BLACK WON THE GAME!', 
                                 pos = (0,0), scale = .1)
 
@@ -564,6 +606,32 @@ class Chess(ShowBase):
 
                             self.taskMgr.add(self.gameOverCam, "END")
                             self.end = True
+
+
+                    elif m[:6] == "TIMER:":
+                        self.timerP2 = int(m[7:])
+
+
+                    elif m[:9] == "PROMOTION":
+                        if self.boardState[int(m[10])][int(m[11])]:
+                            if self.boardState[int(m[10])][int(m[11])][1] == "P":
+                                self.passedTime = 0
+                            
+                                self.allowDrawRequestThisMove = True
+                                self.allowUndoRequestThisMove = True
+                                self.taskMgr.remove("WaitingForOpponent")
+                                self.Engine.setBoard([int(m[12]), int(m[13])],
+                                            self.Engine.getPlayer()+m[9])
+                                self.Engine.setBoard([int(m[10]), int(m[11])], '')
+                                self.Engine.switchPlayer()
+
+                                self.drawBoard()
+                                        
+                                self.evaluateGame() 
+                                self.player = self.Engine.getPlayer()
+                                self.selectedTiles.clear()
+
+
                     
                     elif len(m) == 4:
                         isDigit = True
@@ -577,41 +645,33 @@ class Chess(ShowBase):
 
                             move = self.Engine.makeMove(
                                 [m1, m2], [m3, m4])
+
+
                         else:
-                            if m[:9] == "PROMOTION":
-                                if self.boardState[m[10]][m[11]]:
-                                    if self.boardState[m[10]][m[11]][0] == "P":
-                                        self.taskMgr.remove("WaitingForOpponent")
-                                        self.Engine.setBoard([m[12], m[13]],
-                                                    self.Engine.getPlayer()+m[9])
-                                        
-                                        self.Engine.switchPlayer()
-                                        self.evaluateGame() 
-                                        self.player = self.Engine.getPlayer()
-                                        self.selectedTiles.clear()
-                            else:
-                                move = "NOPE"
-                        
+                            move = "NOPE"
+                    
                         if move == "SUCCESS":
+                            self.passedTime = 0
+                            
                             self.allowDrawRequestThisMove = True
                             self.allowUndoRequestThisMove = True
                             self.taskMgr.remove("WaitingForOpponent")
                             
-                            self.highlightTiles([m[2], m[3]], "ORANGE")
-                            newPiece, label = self.setupAnimation([[m1, m2], 
-                                [m3, m4]])
+                            self.highlightTiles([m3, m4], "ORANGE")
+                            newPiece, label = self.setupAnimation([m1, m2], 
+                                [m3, m4])
                             s1, s2 = .2, .2
 
                             if label == "N":
-                                if abs(currRow - toRow) == 2:
+                                if abs(m1 - m3) == 2:
                                     s1, s2 = .1, .2
                                 else:
                                     s1, s2 = .2, .1
 
-                            ID = f"{m1}{m2}{m3}{m4}"
+                            ID = f"{m1}{m2}-{m3}{m4}"
 
                             self.taskMgr.add(self.playAnimation, f"Animation{ID}", 
-                                extraArgs=[newPiece, [7-((m%10)*2), -7+((m//100)*2)], 
+                                extraArgs=[newPiece, [7-(m4*2), -7+(m3*2)], 
                                 s1, s2, ID])
 
                             self.Engine.switchPlayer()
@@ -620,6 +680,10 @@ class Chess(ShowBase):
 
                             self.player = self.Engine.getPlayer()
                             self.selectedTiles.clear()
+                            
+                            if len(self.Engine.moveLog) == 1 and self.myColor == 'b':
+                                taskMgr.doMethodLater(1.0, self.timerHandler,
+                                                      'keepTimer')
 
 
         return Task.cont
@@ -627,6 +691,8 @@ class Chess(ShowBase):
 
     def sendP2(self, command):
         if self.myColor == self.player:
+            self.beep2.play()
+            
             if command == 'D':
                 if self.allowDrawRequestThisMove:
                     self.allowDrawRequestThisMove = False
@@ -666,8 +732,6 @@ class Chess(ShowBase):
 
                 if popUp == 'yes':
                     self.chatConn.sendMessage(self.nameP2, "I Resign")
-
-                    self.chatConn.sendMessage(self.nameP2, "I Resign")
                     if self.myColor == 'w':
 
                         mate = OnscreenText(text = 'You Resigned.', pos = (0,0.2), scale = .3)
@@ -691,6 +755,7 @@ class Chess(ShowBase):
                     self.taskMgr.add(self.gameOverCam, "END")
                     self.end = True
         else:
+            self.buttonError.play()
             temp = OnscreenText(
             text = "You cannot send a request during your opponent's turn", 
             pos = (0, 0.9), scale = .06)
@@ -712,7 +777,8 @@ class Chess(ShowBase):
             if gameOver == "StaleMate":
                 ### STALEMATE ###
                 textObject = OnscreenText(text ='STALEMATE!', pos = (0,0), scale = .1)
-                                        
+                wins[2] += 1
+                
             elif gameOver == "CheckMate":
                 plr = self.Engine.getPlayer()
 
@@ -744,38 +810,55 @@ class Chess(ShowBase):
                 textObject = OnscreenText(text ='DRAW! INSUFFICIENT MATERIAL LEFT', 
                     pos = (0,0), scale = .1)
 
-        elif not self.mode == 'AI':
-            self.Player = self.Engine.getPlayer()
-            
 
-
-    def playAI(self):
+    def playAI(self, task):
         if self.end != True:
-            move = self.AI.getSmartMove()[1]
+            move = self.AI.getSmartMove(self.Engine.getMoveLog(), self.Engine.getBoard())[1]
             currRow, currCol = move[0][0], move[0][1]
             toRow, toCol = move[1][0], move[1][1]
 
-            move = self.Engine.makeMove(
-                [currRow, currCol], [toRow, toCol])
-            self.boardState = self.Engine.getBoard()
+            if self.boardState[currRow][currCol] and self.boardState[currRow][currCol][1] == 'P':
+                # Pawn promotion
+                if toRow == 7 or toRow == 0:
+                    self.Engine.setBoard([currRow, currCol], '')
+                    self.Engine.setBoard([toRow, toCol],
+                                            self.Engine.getPlayer()+'Q')
+                    self.Engine.moveLog.append(["MANUAL", [currRow, currCol, toRow, toCol],
+                                                self.Engine.getPlayer()+'Q'])
+                    self.boardState = self.Engine.getBoard()
+                else:
+                    move = self.Engine.makeMove(
+                    [currRow, currCol], [toRow, toCol])
+                self.boardState = self.Engine.getBoard()
 
+            else:
+                move = self.Engine.makeMove(
+                    [currRow, currCol], [toRow, toCol])
+                self.boardState = self.Engine.getBoard()
+
+
+            self.beep.play()
             self.highlightTiles([toRow, toCol], "ORANGE")
             newPiece, label = self.setupAnimation([currRow, currCol], [toRow, toCol])
-                                            
+                                                
             s1, s2 = .2, .2
-                                            
+                                                
             if label == 'N':
                 if abs(currRow - toRow) == 2:
                     s1, s2 = .1, .2
                 else:
                     s1, s2 = .2, .1
-
+                    
+            self.Engine.switchPlayer()
             ID = f"{currRow}{currCol}-{toRow}{toCol}"
             self.taskMgr.add(self.playAnimation, f"Animation{ID}", 
                 extraArgs=[newPiece, [7-(toCol*2), -7+(toRow*2)], s1, s2, ID])
                                             
             self.selectedTiles.clear()
             self.AIToPlay = False
+            self.taskMgr.remove(task)
+
+        self.taskMgr.remove(task)
                 
 
     def askForPromotionTitle(self, pos):
@@ -802,15 +885,20 @@ class Chess(ShowBase):
 
 
     def setTitle(self, pos, title):
+        self.beep2.play()
+        
         self.choosingTitle = False
         self.Engine.setBoard([pos[0], pos[1]], self.Engine.getPlayer()+title)
-        self.Engine.switchPlayer()
-        self.Engine.getPlayer()
+        self.moveLog.append(["PROMOTION", [pos[2], pos[3], pos[0], pos[1]]])
 
         if self.mode == 'AI':
-            self.playAI()
+            if self.Engine.getPlayer() != self.enemyColor:
+                self.AIToPlay = True
+                self.taskMgr.doMethodLater(.5, self.makeAIMove, "AIHandler")
+            else:
+                self.Engine.switchPlayer()
         else:
-            chatConn.sendMessage(self.nameP2,
+            self.chatConn.sendMessage(self.nameP2,
                             f'PROMOTION{title}{pos[2]}{pos[3]}{pos[0]}{pos[1]}')
         self.evaluateGame()
         self.drawBoard()
@@ -851,7 +939,7 @@ class Chess(ShowBase):
             newPiece.setTexture(self.pTextures[1])
             newPiece.setHpr(180,90,0)
 
-        if self.pieceHolders:
+        if self.pieceHolders and f"{currPos[0]}{currPos[1]}" in self.pieceHolders:
             pieceNode = self.pieceHolders[f"{currPos[0]}{currPos[1]}"].removeNode()
 
         return newPiece, piece[1]
@@ -859,7 +947,7 @@ class Chess(ShowBase):
 
     def playAnimation(self, newPiece, toPos, s1, s2, ID):
         pos = newPiece.getPos()
-
+        
         if abs(pos[1] - toPos[1]) > .1:
             if toPos[1] > pos[1]:
                 if abs(pos[0] - toPos[0]) > .1:
@@ -892,6 +980,7 @@ class Chess(ShowBase):
             newPiece.removeNode()
             self.selectedTiles.clear()
             self.drawBoard()
+            self.boardState = self.Engine.getBoard()
 
             if self.allowChanging:
                 # Switch the camera posiiont too (if it is not disabled)
@@ -902,14 +991,20 @@ class Chess(ShowBase):
                     self.view = 3
                     self.changeView()
 
-            if self.mode == 'AI':
+            if self.mode == 'Multiplayer':
+                if self.myColor != self.player:
+                    self.taskMgr.doMethodLater(1.0, self.waitForOpponent, "WaitingForOpponent")
+
+                    if len(self.Engine.moveLog) == 1:
+                        taskMgr.doMethodLater(1.0, self.timerHandler, 'keepTimer')
+
+            elif self.mode == 'AI':
+                self.evaluateGame()
+                self.player = self.Engine.getPlayer()
                 # This move has ended, so switch the player's turn
-                if self.AIToPlay == True:
-                    self.playAI()
+                if self.player != self.myColor:
+                    self.AIToPlay = True
                 else:
-                    self.Engine.switchPlayer()
-                    self.evaluateGame()
-                    self.player = self.Engine.getPlayer()
                     if self.allowChanging:
                         if self.player == 'w':
                             self.view = 2
@@ -918,20 +1013,21 @@ class Chess(ShowBase):
                             self.view = 3
                             self.changeView()
 
-            elif self.mode == 'Multiplayer':
-                if self.myColor != self.player:
-                    self.taskMgr.doMethodLater(1.0, self.waitForOpponent, "WaitingForOpponent")
 
-                    if len(self.Engine.moveLog) == 1:
-                        taskMgr.doMethodLater(1.0, self.timerHandler, 'keepTimer')
+        return Task.cont
 
 
+    def makeAIMove(self, task):
+        if self.AIToPlay is True and not self.end:
+            self.taskMgr.doMethodLater(1, self.playAI, "AITURN")
+            self.AIToPlay = False
 
         return Task.cont
 
 
     def changeView(self):
         if not self.end:
+            self.beep2.play()
             self.view += 1
             pos = self.view % 3
             if pos == 0:
@@ -952,6 +1048,7 @@ class Chess(ShowBase):
 
     def changeTheme(self):
         if not self.end:
+            self.beep2.play()
             self.texture += 2
 
             num = len(self.alltTextures)
@@ -983,13 +1080,6 @@ class Chess(ShowBase):
                                     extraArgs=[f"CAMERA{whichTimer}", switchCamtext, whichTimer])
 
 
-    def close(self):
-        if self.mode == 'Multiplayer':
-            self.chatConn.sendMessage(self.nameP2, "I Quit.")
-        base.destroy()
-        sys.exit()
-
-
     def gameOverCam(self, task):
         hpr = self.cam.getHpr()
         pos = self.cam.getPos()
@@ -1013,6 +1103,10 @@ class Chess(ShowBase):
                                             pos=(.2,0,-0.3), scale=0.05, 
                                             command=self.endHandler, extraArgs=['NO'])
             else:
+                self.taskMgr.remove("keepTimer")
+                self.timerP1Label.destroy()
+                self.timerP2Label.destroy()
+                
                 goodGameText = OnscreenText(
                     text='Good Game!', pos = (0,-0.2), scale = .08)
                 ok = DirectGui.DirectButton(text=('EXIT'),
@@ -1035,19 +1129,22 @@ class Chess(ShowBase):
             self.timerP1Label.text = minute+':'+second
                 
             self.timerP1 -= 1
-            if self.timerP1 < 0:
+            if self.timerP1 < 1 or (self.passedTime > 120 and self.player == self.myColor):
                 # GAME OVER! TIMER RAN OUT
                 self.taskMgr.add(self.gameOverCam, "END")
                 self.end = True
-                winner = ""
-                if self.myColor == 'w':
-                    winner = "BLACK"
-                else:
-                    winner = "WHITE"
 
-                mate = OnscreenText(text ='OUT OF TIME!', pos = (0,0.2), scale = .3)
-                textObject = OnscreenText(text =f'{WINNER} WON THE GAME!', 
+                WINNER = ""
+
+                if self.myColor == 'w':
+                    mate = OnscreenText(text ='OUT OF TIME!', pos = (0,0.2), scale = .3)
+                    textObject = OnscreenText(text ='BLACK WON THE GAME!', 
                             pos = (0,0), scale = .1)
+                else:
+                    mate = OnscreenText(text ='OUT OF TIME!', pos = (0,0.2), scale = .3)
+                    textObject = OnscreenText(text ='WHITE WON THE GAME!', 
+                            pos = (0,0), scale = .1)
+
 
                 self.taskMgr.remove("keepTimer")
         else:
@@ -1062,33 +1159,83 @@ class Chess(ShowBase):
             self.timerP2Label.text = minute+':'+second
             self.timerP2 -= 1
             
-            if self.timerP2 < 0:
+            if self.timerP2 < 1 or (self.passedTime > 120 and self.player != self.myColor):
                 # GAME OVER! TIMER RAN OUT
                 self.taskMgr.add(self.gameOverCam, "END")
                 self.end = True
                 winner = ""
                 if self.myColor == 'w':
-                    winner = "WHITE"
+                    mate = OnscreenText(text ='OUT OF TIME!', pos = (0,0.2), scale = .3)
+                    textObject = OnscreenText(text ='WHITE WON THE GAME!', 
+                            pos = (0,0), scale = .1)
                 else:
-                    winner = "BLACK"
-
-                mate = OnscreenText(text ='OUT OF TIME!', pos = (0,0.2), scale = .3)
-                textObject = OnscreenText(text =f'{WINNER} WON THE GAME!', 
+                    mate = OnscreenText(text ='OUT OF TIME!', pos = (0,0.2), scale = .3)
+                    textObject = OnscreenText(text ='BLACK WON THE GAME!', 
                             pos = (0,0), scale = .1)
     
                 self.taskMgr.remove("keepTimer")
 
-        
+        if self.passedTime > 90:
+            if self.player == self.myColor:
+                temp = OnscreenText(
+                        text = f'You have {120-self.passedTime} seconds to make a move.', 
+                        pos = (0, 0.9), scale = .06)
+
+                self.timer.append(6.5)
+                whichTimer = len(self.timer)-1
+
+                self.taskMgr.add(self.displayWarning, f"TIMERWARN{whichTimer}", 
+                                    extraArgs=[f"TIMERWARN{whichTimer}", temp, whichTimer])
+
+        self.passedTime += 1
+        return Task.again
+
+
+    def startTemporaryTimer(self, task):
+        if len(self.Engine.moveLog) == 0:
+            self.passedTime += 1
+        else:
+            self.taskMgr.remove(task)
+
+        if self.passedTime > 10:
+            temp = OnscreenText(
+            text = f'You have {30-self.passedTime} seconds to make a move.', 
+                        pos = (0, 0.9), scale = .06)
+
+            self.timer.append(6.5)
+            whichTimer = len(self.timer)-1
+
+            self.taskMgr.add(self.displayWarning, f"FIRSTTIMERWARN{whichTimer}", 
+                                extraArgs=[f"FIRSTTIMERWARN{whichTimer}", temp, whichTimer])
+
+        if self.passedTime > 29:
+            self.taskMgr.remove(task)
+            self.chatConn.sendMessage(self.nameP2, "I Resign")
+
+            if self.myColor == 'w':
+                mate = OnscreenText(text = 'You Resigned.', pos = (0,0.2), scale = .3)
+                textObject = OnscreenText(text = 'BLACK WON THE GAME!', 
+                    pos = (0,0), scale = .1)
+                self.taskMgr.add(self.gameOverCam, "END")
+                self.end = True
+
+                if (wins[0] + wins[1] + wins[2])%2 == 0:
+                    wins[1] += 1
+                else:
+                    wins[0] += 1
         return Task.again
 
 
     def endHandler(self, ans):
+        self.mySound.stop()
+        if self.mode == 'Multiplayer':
+            self.chatConn.sendMessage(self.nameP2, "I Quit.")
+
         if ans == "NO":
             playAgain = False
-            self.close()
-        else:
-            taskMgr.stop()
-            base.destroy()
+
+        taskMgr.stop()
+        base.destroy()
                 
 
 
@@ -1097,14 +1244,25 @@ class Chess(ShowBase):
         colors = ["White", "Black"]
         allGames = wins[0] + wins[1] + wins[2]
 
+
         if not destroy:
             # Display curren players
+            p1Color, p2Color = colors[allGames%2], colors[(allGames+1)%2]
+
+            if self.mode == "Multiplayer":
+                if self.myColor == 'w':
+                    p1Color, p2Color = "White", "Black"
+                else:
+                    p1Color, p2Color = "Black", "White"
+
+
             self.plr1Color = OnscreenText(
-                    text = f'{self.nameP1}: {colors[allGames%2]}', 
+                    text = f'{self.nameP1}: {p1Color}', 
                     pos = (-.5, -0.9), scale = .07)
             self.plr2Color = OnscreenText(
-                    text = f'{self.nameP2}: {colors[(allGames+1)%2]}', 
+                    text = f'{self.nameP2}: {p2Color}', 
                     pos = (0.5, -0.9), scale = .07)
+                
 
             if wins != [0, 0, 0]:
                 # Make the scores appear
@@ -1121,7 +1279,7 @@ class Chess(ShowBase):
                     if allGames%2 == 1:
                         self.myColor = 'b'
                         self.AIToPlay = True
-                        self.playAI()
+                        self.taskMgr.doMethodLater(.5, self.makeAIMove, "AIHandler")
 
                         self.view = 0
                         self.changeView()
@@ -1154,7 +1312,9 @@ class MainMenu():
         self.top.geometry('512x512+500+200')
         self.top.resizable(0,0)
         self.open = False
-
+    
+        
+        # need canvas to load background image
         C = tkinter.Canvas()
         filename = tkinter.PhotoImage(file = PATH+"Textures/chessbg2.png")
         background_label = tkinter.Label(self.top, image=filename)
@@ -1172,7 +1332,9 @@ class MainMenu():
         C.pack()
         self.top.mainloop()
 
+
     def mode(self, v):
+        # make sure user can't open multiple screens
         if not self.open:
             self.open = True
             if v == 'AI':
@@ -1202,7 +1364,7 @@ class Multiplayer():
         self.mainMenu = mainMenuObj.top
         self.mainScreenHolder = ''
         self.mainuser = ''
-        self.requests = []
+        self.sentRequests = []
         self.requestsOpen = False
 
     '''
@@ -1216,7 +1378,7 @@ class Multiplayer():
         self.mainMenuObj.open = False
         # if it is the correct login info, then go to the mainScreen
         if ans:
-            self.mainUser = username
+            self.mainuser = username
             self.mainScreen()
 
     def loginScreen(self):
@@ -1255,17 +1417,18 @@ class Multiplayer():
 
 
     def updateStatus(self, friendsListOn, friendsListOff):
-        # update friends list
+        # update friends list (online and offline)
         friends = self.ChatCommObj.getFriends()
         friendsListOn.delete(0, tkinter.END)
         friendsListOff.delete(0, tkinter.END)
         order = []
 
         for friend in friends:
-            if friend in self.online:
-                friendsListOn.insert(tkinter.END, friend)
-            else:
-                friendsListOff.insert(tkinter.END, friend)
+            if friend != self.mainuser:
+                if friend in self.online:
+                    friendsListOn.insert(tkinter.END, friend)
+                else:
+                    friendsListOff.insert(tkinter.END, friend)
 
 
     def checkForMessages(self, mainScreen, friendsListOn, friendsListOff):
@@ -1291,7 +1454,6 @@ class Multiplayer():
                     if self.playingChess == []:
                         popUp = tkinter.messagebox.askquestion('Play Chess',
                                     f'Do you want to play Chess with {u}?')
-                        self.requests.append(u)
 
                         if popUp == 'yes':
                             self.ChatCommObj.sendMessage(u, "Yes I want to play!")
@@ -1300,24 +1462,22 @@ class Multiplayer():
 
                         else:
                             self.ChatCommObj.sendMessage(u, "No I don't want to play.")
-                            self.requests.remove(u)
 
-                    else:
-                        self.ChatCommObj.sendMessage(u, "I'm already playing Chess!")
-
-                if m == "I'm already playing Chess!":
-                    tkinter.messagebox.showinfo('Error',
-                                                f'{u} is already in a game!')
+                            if u in self.sentRequests:
+                                self.sentRequests.remove(u)
 
                 if m == "Yes I want to play!":
-                    if self.playingChess == [] and u in self.requests:
-                        self.requests.remove(u)
+                    if self.playingChess == [] and u in self.sentRequests:
+                        self.sentRequests.remove(u)
                         self.playingChess.append(u)
                         self.setUpGame('b')
 
                 elif m == "No I don't want to play.":
-                    tkinter.messagebox.showinfo('Declined',
+                    if u in self.sentRequests:
+                        self.sentRequests.remove(u)
+                        tkinter.messagebox.showinfo('Declined',
                                 f'{u} has declined your request to play now.')
+    
         
         if update or friendsListOff.size() == 0:
             self.updateStatus(friendsListOn, friendsListOff)
@@ -1330,23 +1490,26 @@ class Multiplayer():
         if friendList.curselection():
             friend = friendList.get(friendList.curselection())
             friend = friend[friend.find(' ')+1:]
+            print(friend)
             
             if friend in self.online:
+                self.sentRequests.append(friend)
                 self.ChatCommObj.sendMessage(friend, "Do you want to play Chess?")
                 tkinter.messagebox.showinfo('Success!',
                     f'Request to play chess with {friend} has been sent successfully!')
-            else:
-                tkinter.messagebox.showinfo('Failure!',
-                                f'{friend} is not online!')
 
 
-    def addFriend(self, usersList):
+    def addFriend(self, usersList, friendListOn, friendsListOff):
         if usersList.curselection():
             user = usersList.get(usersList.curselection())
             self.ChatCommObj.sendFriendRequest(user)
 
             tkinter.messagebox.showinfo('Success!',
                     f'Friend Request to {user} has been sent successfully!')
+
+            self.ChatCommObj.sendMessage(user, "Are you online?")
+
+            self.updateStatus(friendsListOn, friendsListOff)
 
 
     def viewRequests(self):
@@ -1391,7 +1554,7 @@ class Multiplayer():
 
     def setUpGame(self, color):
         self.mainScreenHolder.destroy()
-        game = Chess("Multiplayer", self.mainUser, 
+        game = Chess("Multiplayer", self.mainuser, 
             self.playingChess[0], color, self.ChatCommObj)
         game.run()
 
@@ -1424,7 +1587,7 @@ class Multiplayer():
         allUsersList = tkinter.Listbox(mainScreen)
 
         for friend in friends:
-            if friend == 'assertivethrush':
+            if friend == 'assertivethrush' or friend == 'fts':
                 self.ChatCommObj.sendMessage(friend, "Are you online?")
 
         for user in users:
@@ -1439,7 +1602,8 @@ class Multiplayer():
 
         # Buttons
         addFriendButton = tkinter.Button(mainScreen, text='Add Friend',
-                                         command=lambda:self.addFriend(allUsersList))
+                                         command=lambda:self.addFriend(
+                                             allUsersList, friendsListOn, friendsListOff))
         playChessButton = tkinter.Button(mainScreen, text='Play Chess!',
                                          command=lambda:self.playChess(friendsListOn))
         viewRequestsButton = tkinter.Button(mainScreen, text='View Requests',
@@ -1449,7 +1613,6 @@ class Multiplayer():
         addFriendButton.grid(row=2, column=0)
         viewRequestsButton.grid(row=2, column=2)
 
-        # assertivethrush
         mainScreen.protocol("WM_DELETE_WINDOW", lambda:self.onClosing(mainScreen))
         
         mainScreen.mainloop()
@@ -1468,7 +1631,15 @@ playAgain = True
 class ChessAI():
     def play(self):
         while playAgain:
-            game = Chess("AI", "Player 1", "Computer", "w")
+            if (wins[0]+wins[1]+wins[2])%2 == 0:
+                game = Chess("AI", "Player 1", "Computer", "w")
+            else:
+                game = Chess("AI", "Player 1", "Computer", "b")
+
             game.run()
 
+            if not playAgain:
+                sys.exit()
+
 mainMenu = MainMenu()
+sys.exit()

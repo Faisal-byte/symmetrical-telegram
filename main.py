@@ -813,12 +813,15 @@ class Chess(ShowBase):
 
     def playAI(self, task):
         if self.end != True:
-            move = self.AI.getSmartMove(self.Engine.getMoveLog(), self.Engine.getBoard())[1]
+            myMoveLog = self.Engine.getMoveLog()[:]
+            move = self.AI.getSmartMove(myMoveLog, self.Engine.getBoard())[1]
             currRow, currCol = move[0][0], move[0][1]
             toRow, toCol = move[1][0], move[1][1]
+            
 
             if self.boardState[currRow][currCol] and self.boardState[currRow][currCol][1] == 'P':
                 # Pawn promotion
+                
                 if toRow == 7 or toRow == 0:
                     self.Engine.setBoard([currRow, currCol], '')
                     self.Engine.setBoard([toRow, toCol],
@@ -835,8 +838,7 @@ class Chess(ShowBase):
                 move = self.Engine.makeMove(
                     [currRow, currCol], [toRow, toCol])
                 self.boardState = self.Engine.getBoard()
-
-
+            
             self.beep.play()
             self.highlightTiles([toRow, toCol], "ORANGE")
             newPiece, label = self.setupAnimation([currRow, currCol], [toRow, toCol])
@@ -857,7 +859,7 @@ class Chess(ShowBase):
             self.selectedTiles.clear()
             self.AIToPlay = False
             self.taskMgr.remove(task)
-
+            
         self.taskMgr.remove(task)
                 
 
@@ -889,7 +891,7 @@ class Chess(ShowBase):
         
         self.choosingTitle = False
         self.Engine.setBoard([pos[0], pos[1]], self.Engine.getPlayer()+title)
-        self.moveLog.append(["PROMOTION", [pos[2], pos[3], pos[0], pos[1]]])
+        self.Engine.moveLog.append(["PROMOTION", [pos[2], pos[3], pos[0], pos[1]]])
 
         if self.mode == 'AI':
             if self.Engine.getPlayer() != self.enemyColor:
